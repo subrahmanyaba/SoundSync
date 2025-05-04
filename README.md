@@ -67,4 +67,4 @@ Open source coz I'm broke and also the code is just crap lol.
 
 > Built with ❤️ to make your tabs play in harmony.
 
-## Read me file is from chatGPT btw
+Read me file is from chatGPT btw

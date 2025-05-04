@@ -12,7 +12,7 @@
     btn.style.fontFamily = "Georgia";
   
     Object.assign(btn.style, {
-      position: "absolute",
+      position: "fixed",
       top: "100px",
       left: "100px",
       width: "48px",

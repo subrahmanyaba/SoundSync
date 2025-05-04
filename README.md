@@ -55,13 +55,13 @@
 ## 🧠 Contributing
 
 Feel free to suggest improvements by submitting a pull request to the master branch.  
-We (I) welcome feedback!
+We / I welcome feedback!
 
 ---
 
 ## 📃 License
 
-Open source coz I'm broke and the its just crap lol.
+Open source coz I'm broke and also the code is just crap lol.
 
 ---
 

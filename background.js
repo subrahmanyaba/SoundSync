@@ -39,9 +39,9 @@ function injectSetVolume(tabId, volume) {
 
 // Dim other tabs
 async function dimOthers(activeTabId) {
-  if (!controllerEnabled) return;
+  if (!controllerEnabled) return true;
   const activeTab = await chrome.tabs.get(activeTabId);
-  if (!activeTab.audible) return;
+  if (!activeTab.audible) return true;
 
   await ensureOriginal(activeTabId);
   const base = originalVolumes[activeTabId];
@@ -62,7 +62,7 @@ function broadcastState() {
       chrome.tabs.sendMessage(t.id, {
         action: "overrideToggled",
         overrideActive
-      });
+      },()=>{});
     }
   });
 }
@@ -89,7 +89,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "userVolume" && sender.tab?.id != null) {
     originalVolumes[sender.tab.id] = msg.volume;
     console.log(`[SoundSync] userVolume: tab ${sender.tab.id} →`, msg.volume);
-    return;
+    return true;
   }
   if (msg.action === "override") {
     controllerEnabled = false;
@@ -98,7 +98,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       injectSetVolume(Number(tid), vol);
     }
     broadcastState();
-    return;
+    return true;
   }
   if (msg.action === "enable") {
     controllerEnabled = true;
@@ -113,5 +113,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         setTimeout(() => dimOthers(active.id), 500);
       }
     })();
+    return true
   }
 });

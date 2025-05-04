@@ -8,7 +8,8 @@
     // 1) Create the round “S” button
     const btn = document.createElement("div");
     btn.id = "soundsync-override-btn";
-    btn.textContent = "S";
+    btn.textContent = "𝓢";  // or try others from below
+    btn.style.fontFamily = "Georgia";
   
     Object.assign(btn.style, {
       position: "absolute",
@@ -49,6 +50,7 @@
         ? "none"
         : "0 0 12px 4px #0ff";
     });
+    // chrome.runtime.sendMessage({ action: "getOverrideState" });
   
     // 4) Listen for state changes
     chrome.runtime.onMessage.addListener(msg => {
@@ -69,7 +71,7 @@
       e.preventDefault();
     });
     document.addEventListener("mousemove", e => {
-      if (!isDragging) return;
+      if (!isDragging) return true;
       const dx = e.clientX - startX, dy = e.clientY - startY;
       if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
       btn.style.left = `${startLeft + dx}px`;
@@ -87,14 +89,14 @@
   
     // 6) Click toggles override (only if not dragging)
     btn.addEventListener("click", () => {
-      if (moved) { moved = false; return; }
+      if (moved) { moved = false; return true; }
       overrideActive = !overrideActive;
       if (overrideActive) {
         btn.style.boxShadow = "none";
-        chrome.runtime.sendMessage({ action: "override" });
+        chrome.runtime.sendMessage({ action: "override" },()=>{});
       } else {
         btn.style.boxShadow = "0 0 12px 4px #0ff";
-        chrome.runtime.sendMessage({ action: "enable" });
+        chrome.runtime.sendMessage({ action: "enable" },()=>{});
       }
       btn.style.transform = "scale(1.2)";
       setTimeout(() => btn.style.transform = "scale(1)", 200);

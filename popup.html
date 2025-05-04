@@ -1,29 +1,18 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <style>
-    body {
-      width: 200px;
-      padding: 10px;
-      font-family: Arial, sans-serif;
-    }
-    button {
-      width: 100%;
-      padding: 10px;
-      background-color: #007BFF;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    button:hover {
-      background-color: #0056b3;
-    }
-  </style>
-</head>
-<body>
-  <button id="overrideButton">Reset Volumes</button>
-  <button id="toggleButton">Disable Controller</button>
-  <script src="popup.js"></script>
-</body>
+  <head>
+    <style>
+      body { font-family: sans-serif; padding: 10px; }
+      button { padding: 10px 15px; font-size: 16px; }
+    </style>
+  </head>
+  <body>
+    <button id="overrideBtn">Override All</button>
+    <script>
+      document.getElementById("overrideBtn").addEventListener("click", () => {
+        chrome.runtime.sendMessage({ type: "override" });
+        console.log("[SoundSync] Override from popup");
+      });
+    </script>
+  </body>
 </html>

@@ -1,96 +1,105 @@
-let activeTabId = null;
+// background.js
+const originalVolumes = {};    // tabId → original volume
+let controllerEnabled = true;
 
-// Helper: Smoothly set volume of all media in a tab
-function setVolumeSmooth(targetVolume) {
-  const mediaElements = document.querySelectorAll("audio, video");
-  mediaElements.forEach((el) => {
-    const step = (targetVolume - el.volume) / 10;
-    let currentStep = 0;
+console.log("[SoundSync] background started");
 
-    const fade = setInterval(() => {
-      el.volume = parseFloat((el.volume + step).toFixed(3));
-      currentStep++;
-      if (currentStep >= 10) {
-        el.volume = targetVolume;
-        clearInterval(fade);
-      }
-    }, 50); // 10 steps over 500ms
-  });
-}
-
-// Main logic to update tab volumes
-async function updateTabVolumes() {
-  try {
-    const { volumeControlEnabled } = await chrome.storage.local.get("volumeControlEnabled");
-
-    if (volumeControlEnabled === false) {
-      console.log("Volume control is disabled (override active).");
-      return;
+// Helper: grab current page volume
+async function fetchVolume(tabId) {
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const m = document.querySelector("video, audio");
+      return m ? m.volume : null;
     }
+  });
+  return res?.result;
+}
 
-    const tabs = await chrome.tabs.query({ audible: true });
-
-    tabs.forEach((tab) => {
-      if (!tab.id || tab.mutedInfo?.muted) return;
-
-      const targetVolume = tab.id === activeTabId ? 1.0 : 0.25;
-
-      setTimeout(() => {
-        chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: setVolumeSmooth,
-          args: [targetVolume]
-        }).catch((error) => {
-          console.error(`Error executing script on tab ${tab.id}:`, error);
-        });
-      }, 500); // Delay before volume change
-    });
-  } catch (error) {
-    console.error("Error in updateTabVolumes:", error);
+// Store a tab’s original volume if not yet known
+async function ensureOriginal(tabId) {
+  if (originalVolumes[tabId] === undefined) {
+    const vol = await fetchVolume(tabId);
+    originalVolumes[tabId] = (vol != null ? vol : 1.0);
+    console.log(`[SoundSync] stored originalVolumes[${tabId}] =`, originalVolumes[tabId]);
   }
 }
 
-// Listener: track tab focus
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  activeTabId = activeInfo.tabId;
-  await updateTabVolumes();
-});
+// Core: dim others to 25% of focused tab’s own volume
+async function updateVolumes(activeTabId) {
+  if (!controllerEnabled) return;
 
-// Listener: track window focus
-chrome.windows.onFocusChanged.addListener(async (windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab) {
-    activeTabId = tab.id;
-    await updateTabVolumes();
+  // only proceed if that tab is actually audible/playing
+  const activeTab = await chrome.tabs.get(activeTabId);
+  if (!activeTab.audible) {
+    console.log(`[SoundSync] tab ${activeTabId} not audible → skip`);
+    return;
   }
-});
 
-// Listener: when audible tabs start/stops
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.audible !== undefined) {
-    await updateTabVolumes();
-  }
-});
+  await ensureOriginal(activeTabId);
+  const base = originalVolumes[activeTabId];
+  console.log(`[SoundSync] base volume for ${activeTabId} =`, base);
 
-// On startup: enable volume control by default
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ volumeControlEnabled: true });
-});
+  // get every audible tab
+  const tabs = await chrome.tabs.query({ audible: true });
+  for (const t of tabs) {
+    // ensure we have an original for each too
+    await ensureOriginal(t.id);
 
-//Listen for override button message
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "overrideVolumes") {
-    chrome.tabs.query({ audible: true }).then((tabs) => {
-      tabs.forEach((tab) => {
-        chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            document.querySelectorAll("audio, video").forEach(el => el.volume = 1.0);
-          }
-        });
-      });
+    const v = (t.id === activeTabId) ? base : base * 0.25;
+    chrome.scripting.executeScript({
+      target: { tabId: t.id },
+      func: vol => {
+        document.querySelectorAll("video,audio")
+                .forEach(m => m.volume = vol);
+      },
+      args: [v]
     });
+    console.log(`[SoundSync] set tab ${t.id} → volume ${v}`);
+  }
+}
+
+// Listen: tab switch
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  setTimeout(() => updateVolumes(tabId), 500);
+});
+
+// Listen: new audio starts
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.audible && controllerEnabled) {
+    setTimeout(async () => {
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (active && active.audible) await updateVolumes(active.id);
+    }, 500);
+  }
+});
+
+// Listen: override & userVolume messages
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg.action === "override") {
+    controllerEnabled = false;
+    console.log("[SoundSync] override → restoring all");
+    for (const [tid, vol] of Object.entries(originalVolumes)) {
+      const id = Number(tid);
+      chrome.scripting.executeScript({
+        target: { tabId: id },
+        func: v => {
+          document.querySelectorAll("video,audio")
+                  .forEach(m => m.volume = v);
+        },
+        args: [vol]
+      });
+      console.log(`[SoundSync] restored tab ${id} → volume ${vol}`);
+    }
+  }
+
+  if (msg.action === "enable") {
+    controllerEnabled = true;
+    console.log("[SoundSync] controller re-enabled");
+  }
+
+  if (msg.action === "userVolume" && sender.tab?.id != null) {
+    originalVolumes[sender.tab.id] = msg.volume;
+    console.log(`[SoundSync] userVolume: tab ${sender.tab.id} →`, msg.volume);
   }
 });

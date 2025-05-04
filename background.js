@@ -1,96 +1,114 @@
-let activeTabId = null;
+// background.js
+const originalVolumes = {};   // tabId → original user volume
+let controllerEnabled = true;
 
-// Helper: Smoothly set volume of all media in a tab
-function setVolumeSmooth(targetVolume) {
-  const mediaElements = document.querySelectorAll("audio, video");
-  mediaElements.forEach((el) => {
-    const step = (targetVolume - el.volume) / 10;
-    let currentStep = 0;
+console.log("[SoundSync] background started");
 
-    const fade = setInterval(() => {
-      el.volume = parseFloat((el.volume + step).toFixed(3));
-      currentStep++;
-      if (currentStep >= 10) {
-        el.volume = targetVolume;
-        clearInterval(fade);
-      }
-    }, 50); // 10 steps over 500ms
-  });
-}
-
-// Main logic to update tab volumes
-async function updateTabVolumes() {
-  try {
-    const { volumeControlEnabled } = await chrome.storage.local.get("volumeControlEnabled");
-
-    if (volumeControlEnabled === false) {
-      console.log("Volume control is disabled (override active).");
-      return;
+// 1) Fetch the *current* volume from a tab
+async function fetchVolume(tabId) {
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const m = document.querySelector("video, audio");
+      return m ? m.volume : null;
     }
+  });
+  return (res && res.result != null) ? res.result : 1.0;
+}
 
-    const tabs = await chrome.tabs.query({ audible: true });
-
-    tabs.forEach((tab) => {
-      if (!tab.id || tab.mutedInfo?.muted) return;
-
-      const targetVolume = tab.id === activeTabId ? 1.0 : 0.25;
-
-      setTimeout(() => {
-        chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: setVolumeSmooth,
-          args: [targetVolume]
-        }).catch((error) => {
-          console.error(`Error executing script on tab ${tab.id}:`, error);
-        });
-      }, 500); // Delay before volume change
-    });
-  } catch (error) {
-    console.error("Error in updateTabVolumes:", error);
+// 2) Ensure we’ve stored a tab’s original volume
+async function ensureOriginal(tabId) {
+  if (originalVolumes[tabId] === undefined) {
+    originalVolumes[tabId] = await fetchVolume(tabId);
+    console.log(`[SoundSync] stored originalVolumes[${tabId}] =`, originalVolumes[tabId]);
   }
 }
 
-// Listener: track tab focus
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  activeTabId = activeInfo.tabId;
-  await updateTabVolumes();
+// 3) Apply a volume to a tab *with* an ignore‑flag so content.js skips it
+function injectSetVolume(tabId, volume) {
+  chrome.scripting.executeScript({
+    target: { tabId },
+    func: (v) => {
+      document.body.setAttribute("data-ss-ignore", "");
+      document.querySelectorAll("video, audio")
+              .forEach(m => m.volume = v);
+      setTimeout(() => {
+        document.body.removeAttribute("data-ss-ignore");
+      }, 50);
+    },
+    args: [volume]
+  }).catch(err => console.error("[SoundSync] injectSetVolume error", err));
+}
+
+// 4) Core dimming logic: active tab stays at its original, others at 25%
+async function dimOthers(activeTabId) {
+  if (!controllerEnabled) return;
+
+  // Only proceed if that tab is actually playing
+  const activeTab = await chrome.tabs.get(activeTabId);
+  if (!activeTab.audible) {
+    console.log(`[SoundSync] tab ${activeTabId} not playing → skip`);
+    return;
+  }
+
+  // Ensure original volumes captured
+  await ensureOriginal(activeTabId);
+
+  const base = originalVolumes[activeTabId];
+  console.log(`[SoundSync] baseVolume for ${activeTabId} =`, base);
+
+  // Dimming all currently audible tabs
+  const tabs = await chrome.tabs.query({ audible: true });
+  for (const t of tabs) {
+    await ensureOriginal(t.id);  // capture if first time
+    const newVol = (t.id === activeTabId) ? base : base * 0.25;
+    console.log(`[SoundSync] setting tab ${t.id} → volume ${newVol}`);
+    injectSetVolume(t.id, newVol);
+  }
+}
+
+// 5) Listeners
+
+// On switching tabs
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  setTimeout(() => dimOthers(tabId), 500);
 });
 
-// Listener: track window focus
-chrome.windows.onFocusChanged.addListener(async (windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab) {
-    activeTabId = tab.id;
-    await updateTabVolumes();
+// On any tab’s audible flag changing
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.audible && controllerEnabled) {
+    setTimeout(async () => {
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (active && active.audible) {
+        await dimOthers(active.id);
+      }
+    }, 500);
   }
 });
 
-// Listener: when audible tabs start/stops
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.audible !== undefined) {
-    await updateTabVolumes();
+// 6) Messages from content or popup
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  // User manually adjusted volume
+  if (msg.action === "userVolume" && sender.tab?.id != null) {
+    originalVolumes[sender.tab.id] = msg.volume;
+    console.log(`[SoundSync] userVolume: tab ${sender.tab.id} →`, msg.volume);
+    return;
   }
-});
 
-// On startup: enable volume control by default
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ volumeControlEnabled: true });
-});
+  // Override button clicked
+  if (msg.action === "override") {
+    controllerEnabled = false;
+    console.log("[SoundSync] override → restoring all originals");
+    for (const [tid, vol] of Object.entries(originalVolumes)) {
+      injectSetVolume(Number(tid), vol);
+      console.log(`[SoundSync] restored tab ${tid} → volume ${vol}`);
+    }
+    return;
+  }
 
-//Listen for override button message
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "overrideVolumes") {
-    chrome.tabs.query({ audible: true }).then((tabs) => {
-      tabs.forEach((tab) => {
-        chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            document.querySelectorAll("audio, video").forEach(el => el.volume = 1.0);
-          }
-        });
-      });
-    });
+  // Re‑enable controller
+  if (msg.action === "enable") {
+    controllerEnabled = true;
+    console.log("[SoundSync] controller re-enabled");
   }
 });

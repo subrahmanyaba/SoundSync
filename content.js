@@ -1,54 +1,32 @@
 // content.js
+console.log("[SoundSync][content] loaded");
 
-function createOverrideButton() {
-  if (document.getElementById("soundSyncOverrideBtn")) return;
+// Report only *user‑initiated* volume changes
+function reportVolumeChange(evt) {
+  // If the page body has our “ignore” flag, skip (extension is adjusting)
+  if (document.body.hasAttribute("data-ss-ignore")) {
+    console.log("[SoundSync][content] skipped extension volumechange");
+    return;
+  }
+  // Only trust genuine user actions
+  if (!evt.isTrusted) return;
 
-  const button = document.createElement("button");
-  button.id = "soundSyncOverrideBtn";
-  button.innerText = "Override";
+  const vol = evt.target.volume;
+  console.log("[SoundSync][content] userVolume →", vol);
+  chrome.runtime.sendMessage({ action: "userVolume", volume: vol });
+}
 
-  // Style the button
-  Object.assign(button.style, {
-    position: "fixed",
-    bottom: "20px",
-    right: "20px",
-    zIndex: "99999",
-    backgroundColor: "#0e76a8",
-    color: "white",
-    border: "none",
-    borderRadius: "10px",
-    padding: "10px 16px",
-    fontSize: "14px",
-    cursor: "pointer",
-    opacity: "0.4",
-    transition: "opacity 0.3s ease, transform 0.2s ease",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+// Attach our listener to all media elements
+function hookMedia() {
+  document.querySelectorAll("video, audio").forEach(m => {
+    m.removeEventListener("volumechange", reportVolumeChange);
+    m.addEventListener("volumechange", reportVolumeChange);
   });
-
-  button.onmouseenter = () => {
-    button.style.opacity = "1";
-    button.style.transform = "scale(1.05)";
-  };
-
-  button.onmouseleave = () => {
-    button.style.opacity = "0.4";
-    button.style.transform = "scale(1)";
-  };
-
-  button.onclick = async () => {
-    console.log("Override button clicked");
-    await chrome.storage.local.set({ volumeControlEnabled: false });
-
-    chrome.runtime.sendMessage({ action: "overrideVolumes" }, (response) => {
-      console.log("Override message sent");
-    });
-  };
-
-  document.body.appendChild(button);
 }
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", createOverrideButton);
-} else {
-  createOverrideButton();
-}
+// Initial hook + watch for dynamically injected players
+hookMedia();
+new MutationObserver(hookMedia).observe(document.body, {
+  childList: true,
+  subtree: true
+});

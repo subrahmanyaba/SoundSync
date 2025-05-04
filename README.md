@@ -1,5 +1,3 @@
-# Read me file is from chatGPT btw
-
 # SoundSync 🔊
 
 **SoundSync** is a Chrome extension that intelligently manages media volume across browser tabs. The active (focused) tab retains its original volume, while all other audible tabs are smoothly dimmed to avoid distractions.
@@ -68,3 +66,5 @@ Open source coz I'm broke and also the code is just crap lol.
 ---
 
 > Built with ❤️ to make your tabs play in harmony.
+
+## Read me file is from chatGPT btw

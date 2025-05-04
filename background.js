@@ -1,10 +1,10 @@
 // background.js
-const originalVolumes = {};   // tabId → original user volume
+const originalVolumes = {};  
 let controllerEnabled = true;
 
 console.log("[SoundSync] background started");
 
-// 1) Fetch the *current* volume from a tab
+// Fetch current volume
 async function fetchVolume(tabId) {
   const [res] = await chrome.scripting.executeScript({
     target: { tabId },
@@ -16,7 +16,7 @@ async function fetchVolume(tabId) {
   return (res && res.result != null) ? res.result : 1.0;
 }
 
-// 2) Ensure we’ve stored a tab’s original volume
+// Store original if needed
 async function ensureOriginal(tabId) {
   if (originalVolumes[tabId] === undefined) {
     originalVolumes[tabId] = await fetchVolume(tabId);
@@ -24,91 +24,94 @@ async function ensureOriginal(tabId) {
   }
 }
 
-// 3) Apply a volume to a tab *with* an ignore‑flag so content.js skips it
+// Inject volume, skipping content reports
 function injectSetVolume(tabId, volume) {
   chrome.scripting.executeScript({
     target: { tabId },
-    func: (v) => {
+    func: v => {
       document.body.setAttribute("data-ss-ignore", "");
-      document.querySelectorAll("video, audio")
-              .forEach(m => m.volume = v);
-      setTimeout(() => {
-        document.body.removeAttribute("data-ss-ignore");
-      }, 50);
+      document.querySelectorAll("video, audio").forEach(m => m.volume = v);
+      setTimeout(() => document.body.removeAttribute("data-ss-ignore"), 50);
     },
     args: [volume]
-  }).catch(err => console.error("[SoundSync] injectSetVolume error", err));
+  }).catch(console.error);
 }
 
-// 4) Core dimming logic: active tab stays at its original, others at 25%
+// Dim other tabs
 async function dimOthers(activeTabId) {
   if (!controllerEnabled) return;
-
-  // Only proceed if that tab is actually playing
   const activeTab = await chrome.tabs.get(activeTabId);
-  if (!activeTab.audible) {
-    console.log(`[SoundSync] tab ${activeTabId} not playing → skip`);
-    return;
-  }
+  if (!activeTab.audible) return;
 
-  // Ensure original volumes captured
   await ensureOriginal(activeTabId);
-
   const base = originalVolumes[activeTabId];
-  console.log(`[SoundSync] baseVolume for ${activeTabId} =`, base);
 
-  // Dimming all currently audible tabs
   const tabs = await chrome.tabs.query({ audible: true });
   for (const t of tabs) {
-    await ensureOriginal(t.id);  // capture if first time
-    const newVol = (t.id === activeTabId) ? base : base * 0.25;
-    console.log(`[SoundSync] setting tab ${t.id} → volume ${newVol}`);
-    injectSetVolume(t.id, newVol);
+    await ensureOriginal(t.id);
+    const vol = (t.id === activeTabId) ? base : base * 0.25;
+    injectSetVolume(t.id, vol);
   }
 }
 
-// 5) Listeners
+// Broadcast override state to all tabs
+function broadcastState() {
+  const overrideActive = !controllerEnabled;
+  chrome.tabs.query({}, tabs => {
+    for (const t of tabs) {
+      chrome.tabs.sendMessage(t.id, {
+        action: "overrideToggled",
+        overrideActive
+      });
+    }
+  });
+}
 
-// On switching tabs
+// Listeners
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   setTimeout(() => dimOthers(tabId), 500);
 });
-
-// On any tab’s audible flag changing
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.audible && controllerEnabled) {
     setTimeout(async () => {
       const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (active && active.audible) {
-        await dimOthers(active.id);
-      }
+      if (active?.audible) await dimOthers(active.id);
     }, 500);
   }
 });
 
-// 6) Messages from content or popup
-chrome.runtime.onMessage.addListener((msg, sender) => {
-  // User manually adjusted volume
+// Messages
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === "getOverrideState") {
+    sendResponse({ controllerEnabled });
+    return true;
+  }
   if (msg.action === "userVolume" && sender.tab?.id != null) {
     originalVolumes[sender.tab.id] = msg.volume;
     console.log(`[SoundSync] userVolume: tab ${sender.tab.id} →`, msg.volume);
     return;
   }
-
-  // Override button clicked
   if (msg.action === "override") {
     controllerEnabled = false;
-    console.log("[SoundSync] override → restoring all originals");
+    console.log("[SoundSync] override → restoring originals");
     for (const [tid, vol] of Object.entries(originalVolumes)) {
       injectSetVolume(Number(tid), vol);
-      console.log(`[SoundSync] restored tab ${tid} → volume ${vol}`);
     }
+    broadcastState();
     return;
   }
-
-  // Re‑enable controller
   if (msg.action === "enable") {
     controllerEnabled = true;
     console.log("[SoundSync] controller re-enabled");
+    broadcastState();
+  
+    // Immediately re‑apply dimming based on the current active tab
+    (async () => {
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (active && active.audible) {
+        // give it the usual delay
+        setTimeout(() => dimOthers(active.id), 500);
+      }
+    })();
   }
 });

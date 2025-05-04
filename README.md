@@ -38,7 +38,7 @@
 - Just open tabs that play audio or video (YouTube, Spotify Web, etc.).
 - The currently active tab will stay loud; others are dimmed.
 - Drag the floating **S** button anywhere on the screen.
-- Click the button to **override** and reset volumes back to original.
+- Click the button to **override** and reset volumes back to the original.
 - Click again to **re-enable** SoundSync.
 
 ---
@@ -54,14 +54,14 @@
 
 ## 🧠 Contributing
 
-Feel free to suggest improvements by submiting a pull request.  
-We welcome feedback!
+Feel free to suggest improvements by submitting a pull request to the master branch.  
+We (I) welcome feedback!
 
 ---
 
 ## 📃 License
 
-Open source coz im broke
+Open source coz I'm broke and the its just crap lol.
 
 ---
 

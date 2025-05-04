@@ -1,21 +1,32 @@
+// content.js
 console.log("[SoundSync][content] loaded");
 
+// Report only *user‑initiated* volume changes
 function reportVolumeChange(evt) {
+  // If the page body has our “ignore” flag, skip (extension is adjusting)
+  if (document.body.hasAttribute("data-ss-ignore")) {
+    console.log("[SoundSync][content] skipped extension volumechange");
+    return;
+  }
+  // Only trust genuine user actions
+  if (!evt.isTrusted) return;
+
   const vol = evt.target.volume;
-  console.log("[SoundSync][content] volumechange →", vol);
+  console.log("[SoundSync][content] userVolume →", vol);
   chrome.runtime.sendMessage({ action: "userVolume", volume: vol });
 }
 
-function hookAllMedia() {
-  document.querySelectorAll("video,audio").forEach(m => {
+// Attach our listener to all media elements
+function hookMedia() {
+  document.querySelectorAll("video, audio").forEach(m => {
     m.removeEventListener("volumechange", reportVolumeChange);
     m.addEventListener("volumechange", reportVolumeChange);
-    // also capture play as a “fresh original” if needed
-    m.removeEventListener("play", reportVolumeChange);
-    m.addEventListener("play", reportVolumeChange);
   });
 }
 
-// run on load and on DOM mutations (in case players are injected later)
-hookAllMedia();
-new MutationObserver(hookAllMedia).observe(document.body, { childList: true, subtree: true });
+// Initial hook + watch for dynamically injected players
+hookMedia();
+new MutationObserver(hookMedia).observe(document.body, {
+  childList: true,
+  subtree: true
+});

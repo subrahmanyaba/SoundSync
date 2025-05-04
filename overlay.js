@@ -5,12 +5,10 @@
     let overrideActive = false;
     let isDragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0, moved = false;
   
-    // 1) Create button
+    // 1) Create the round “S” button
     const btn = document.createElement("div");
     btn.id = "soundsync-override-btn";
-  
-    // Correctly resolve path to your extension icon
-    const iconUrl = chrome.runtime.getURL("icons/icons.png");
+    btn.textContent = "S";
   
     Object.assign(btn.style, {
       position: "absolute",
@@ -18,22 +16,25 @@
       left: "100px",
       width: "48px",
       height: "48px",
-      backgroundImage: `url("${iconUrl}")`,
-      backgroundRepeat: "no-repeat",
-      backgroundPosition: "center",
-      backgroundSize: "contain",
+      background: "#1e1e1e",
+      color: "#0ff",
+      fontSize: "24px",
+      fontWeight: "bold",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
       borderRadius: "50%",
       border: "2px solid transparent",
       cursor: "grab",
-      zIndex: 999999,
-      transition: "box-shadow 0.3s ease, transform 0.2s ease",
+      zIndex: 2147483647,
+      transition: "box-shadow 0.3s, transform 0.2s",
       userSelect: "none",
-      boxShadow: "0 0 12px 4px #0ff"  // glow when enabled
+      boxShadow: "0 0 12px 4px #0ff"
     });
   
     document.body.appendChild(btn);
   
-    // 2) Load saved position
+    // 2) Restore saved position
     chrome.storage.local.get("overlayPos", data => {
       if (data.overlayPos) {
         btn.style.left = data.overlayPos.left;
@@ -67,7 +68,6 @@
       btn.style.cursor = "grabbing";
       e.preventDefault();
     });
-  
     document.addEventListener("mousemove", e => {
       if (!isDragging) return;
       const dx = e.clientX - startX, dy = e.clientY - startY;
@@ -75,7 +75,6 @@
       btn.style.left = `${startLeft + dx}px`;
       btn.style.top  = `${startTop  + dy}px`;
     });
-  
     document.addEventListener("mouseup", () => {
       if (isDragging) {
         isDragging = false;

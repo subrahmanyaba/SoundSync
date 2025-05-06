@@ -19,7 +19,7 @@
 
 ## 📦 Installation
 
-1. Clone or download this repository.
+1. Clone master branch of the repository (git clone --branch master https://github.com/subrahmanyaba/SoundSync.git) or download this repository.
 
 2. Open [chrome://extensions](chrome://extensions) in your browser.
 

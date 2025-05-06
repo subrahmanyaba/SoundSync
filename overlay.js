@@ -87,9 +87,16 @@
     if (!isDragging) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
+  
     if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-    btn.style.left = `${startLeft + dx}px`;
-    btn.style.top = `${startTop + dy}px`;
+  
+    // Clamp real-time drag position
+    let newLeft = startLeft + dx;
+    let newTop = startTop + dy;
+    const clamped = clampPosition(newLeft, newTop);
+  
+    btn.style.left = `${clamped.left}px`;
+    btn.style.top = `${clamped.top}px`;
   });
 
   document.addEventListener("mouseup", () => {

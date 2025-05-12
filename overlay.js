@@ -34,6 +34,38 @@
 
   document.body.appendChild(btn);
 
+  const handle = document.createElement("div");
+  handle.id = "soundsync-handle";
+  handle.textContent = "𝓢";
+  handle.style.fontFamily = "Georgia";
+  Object.assign(handle.style, {
+    position: "fixed",
+    top: "100px",
+    left: "-6px",
+    width: "6px",
+    height: "48px",
+    background: "rgba(0, 255, 255, 0.05)",
+    borderTopRightRadius: "4px",
+    borderBottomRightRadius: "4px",
+    cursor: "pointer",
+    display: "none",
+    zIndex: 2147483646,
+    transition: "background 0.3s, box-shadow 0.3s"
+  });
+
+
+  document.body.appendChild(handle);
+  
+  handle.addEventListener("mouseenter", () => {
+    handle.style.background = "rgba(0, 255, 255, 0.3)";
+    handle.style.boxShadow = "0 0 4px 1px rgba(0,255,255,0.2)";
+  });
+  
+  handle.addEventListener("mouseleave", () => {
+    handle.style.background = "rgba(0, 255, 255, 0.05)";
+    handle.style.boxShadow = "none";
+  });
+
   // Utility: Clamp to screen bounds
   const clampPosition = (left, top) => {
     const maxLeft = window.innerWidth - 48;
@@ -110,6 +142,24 @@
       btn.style.left = `${clamped.left}px`;
       btn.style.top = `${clamped.top}px`;
 
+      const dockThreshold = 10;
+
+      if (clamped.left <= dockThreshold) {
+        // Dock to left
+        btn.style.display = "none";
+        handle.style.display = "flex";
+        handle.style.left = "0px";
+        handle.style.top = `${clamped.top}px`;
+      } else if (clamped.left >= window.innerWidth - 48 - dockThreshold) {
+        // Dock to right
+        btn.style.display = "none";
+        handle.style.display = "flex";
+        handle.style.left = `${window.innerWidth - 20}px`;
+        handle.style.top = `${clamped.top}px`;
+      } else {
+        handle.style.display = "none";
+      }
+
       chrome.storage.local.set({
         overlayPos: { left: `${clamped.left}px`, top: `${clamped.top}px` }
       });
@@ -133,4 +183,13 @@
     btn.style.transform = "scale(1.2)";
     setTimeout(() => btn.style.transform = "scale(1)", 200);
   });
+
+  handle.addEventListener("click", () => {
+  const handleLeft = parseInt(handle.style.left);
+  const isLeft = handleLeft < window.innerWidth / 2;
+  btn.style.display = "flex";
+  handle.style.display = "none";
+  btn.style.left = isLeft ? "0px" : `${window.innerWidth - 48}px`;
+});
+
 })();

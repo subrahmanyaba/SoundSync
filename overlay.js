@@ -3,7 +3,7 @@
   console.log("[SoundSync][overlay] loaded");
 
   let overrideActive = false;
-  let isDragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0, moved = false;
+  let isDragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0, moved = false, justShownFromHandle = false;
 
   const btn = document.createElement("div");
   btn.id = "soundsync-override-btn";
@@ -44,7 +44,7 @@
     left: "-6px",
     width: "6px",
     height: "48px",
-    background: "rgba(0, 255, 255, 0.05)",
+    background: "rgba(0, 255, 255, 0.015)",
     borderTopRightRadius: "4px",
     borderBottomRightRadius: "4px",
     cursor: "pointer",
@@ -168,7 +168,7 @@
 
   // 6) Click toggles override (only if not dragging)
   btn.addEventListener("click", () => {
-    if (moved) {
+    if (moved || justShownFromHandle) {
       moved = false;
       return;
     }
@@ -184,12 +184,18 @@
     setTimeout(() => btn.style.transform = "scale(1)", 200);
   });
 
+
   handle.addEventListener("click", () => {
   const handleLeft = parseInt(handle.style.left);
   const isLeft = handleLeft < window.innerWidth / 2;
+  
+  justShownFromHandle = true; // prevent immediate toggle
+  setTimeout(() => justShownFromHandle = false, 200);
+
   btn.style.display = "flex";
   handle.style.display = "none";
   btn.style.left = isLeft ? "0px" : `${window.innerWidth - 48}px`;
 });
+
 
 })();

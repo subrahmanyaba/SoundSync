@@ -1,10 +1,11 @@
 // background.js
-const originalVolumes = {};  
+const originalVolumes = {};  // Stores the user's intended volume for each tab
+const volumeMultipliers = {}; // Tracks current multiplier applied (1.0 = full, 0.25 = dimmed)
 let controllerEnabled = true;
 
 console.log("[SoundSync] background started");
 
-// Fetch current volume
+// Fetch current volume, accounting for any multiplier we've applied
 async function fetchVolume(tabId) {
   const [res] = await chrome.scripting.executeScript({
     target: { tabId },
@@ -13,19 +14,40 @@ async function fetchVolume(tabId) {
       return m ? m.volume : null;
     }
   });
-  return (res && res.result != null) ? res.result : 1.0;
+  const currentVol = (res && res.result != null) ? res.result : 1.0;
+  
+  // If we've applied a multiplier, reverse it to get the original
+  const multiplier = volumeMultipliers[tabId] ?? 1.0;
+  if (multiplier > 0) {
+    return currentVol / multiplier;
+  }
+  return currentVol;
 }
 
 // Store original if needed
 async function ensureOriginal(tabId) {
   if (originalVolumes[tabId] === undefined) {
-    originalVolumes[tabId] = await fetchVolume(tabId);
+    // When first capturing, assume no multiplier applied yet
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const m = document.querySelector("video, audio");
+        return m ? m.volume : null;
+      }
+    }).catch(() => [{ result: null }]);
+    
+    const currentVol = (res && res.result != null) ? res.result : 1.0;
+    // Reverse any existing multiplier to get true original
+    const multiplier = volumeMultipliers[tabId] ?? 1.0;
+    originalVolumes[tabId] = multiplier > 0 ? currentVol / multiplier : currentVol;
+    volumeMultipliers[tabId] = 1.0; // Initialize multiplier
     console.log(`[SoundSync] stored originalVolumes[${tabId}] =`, originalVolumes[tabId]);
   }
 }
 
-// Inject volume, skipping content reports
-function injectSetVolume(tabId, volume) {
+// Inject volume with multiplier tracking
+function injectSetVolume(tabId, volume, multiplier) {
+  volumeMultipliers[tabId] = multiplier;
   chrome.scripting.executeScript({
     target: { tabId },
     func: v => {
@@ -37,20 +59,38 @@ function injectSetVolume(tabId, volume) {
   }).catch(console.error);
 }
 
-// Dim other tabs
+// Dim other tabs - active tab gets full volume, others get 25% of active tab's volume
 async function dimOthers(activeTabId) {
   if (!controllerEnabled) return true;
-  const activeTab = await chrome.tabs.get(activeTabId);
+  
+  let activeTab;
+  try {
+    activeTab = await chrome.tabs.get(activeTabId);
+  } catch (e) {
+    // Tab might have been closed
+    return true;
+  }
+  
   if (!activeTab.audible) return true;
 
   await ensureOriginal(activeTabId);
-  const base = originalVolumes[activeTabId];
+  const activeOriginalVol = originalVolumes[activeTabId] ?? 1.0;
 
   const tabs = await chrome.tabs.query({ audible: true });
   for (const t of tabs) {
     await ensureOriginal(t.id);
-    const vol = (t.id === activeTabId) ? base : base * 0.25;
-    injectSetVolume(t.id, vol);
+    
+    if (t.id === activeTabId) {
+      // Active tab: restore to original volume (multiplier = 1.0)
+      injectSetVolume(t.id, activeOriginalVol, 1.0);
+    } else {
+      // Other tabs: dim to 25% of active tab's volume
+      const dimmedVol = activeOriginalVol * 0.25;
+      const tabOriginalVol = originalVolumes[t.id] ?? 1.0;
+      // Calculate effective multiplier relative to this tab's original
+      const effectiveMultiplier = tabOriginalVol > 0 ? dimmedVol / tabOriginalVol : 0.25;
+      injectSetVolume(t.id, dimmedVol, effectiveMultiplier);
+    }
   }
 }
 
@@ -79,6 +119,11 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
     }, 500);
   }
 });
+// Clean up when tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  delete originalVolumes[tabId];
+  delete volumeMultipliers[tabId];
+});
 
 // Messages
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -87,15 +132,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.action === "userVolume" && sender.tab?.id != null) {
-    originalVolumes[sender.tab.id] = msg.volume;
-    console.log(`[SoundSync] userVolume: tab ${sender.tab.id} →`, msg.volume);
+    // User changed volume manually - update original and account for current multiplier
+    const multiplier = volumeMultipliers[sender.tab.id] ?? 1.0;
+    // The reported volume is after our multiplier, so reverse it to get intended original
+    originalVolumes[sender.tab.id] = multiplier > 0 ? msg.volume / multiplier : msg.volume;
+    console.log(`[SoundSync] userVolume: tab ${sender.tab.id} → original:`, originalVolumes[sender.tab.id]);
     return true;
   }
   if (msg.action === "override") {
     controllerEnabled = false;
     console.log("[SoundSync] override → restoring originals");
     for (const [tid, vol] of Object.entries(originalVolumes)) {
-      injectSetVolume(Number(tid), vol);
+      injectSetVolume(Number(tid), vol, 1.0); // Restore all to full volume
     }
     broadcastState();
     return true;

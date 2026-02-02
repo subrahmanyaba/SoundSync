@@ -115,4 +115,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true
   }
+  
+  // Broadcast overlay visibility changes to all other tabs
+  if (msg.action === "overlayVisibilityChanged") {
+    chrome.tabs.query({}, tabs => {
+      for (const t of tabs) {
+        if (t.id !== sender.tab?.id) {
+          chrome.tabs.sendMessage(t.id, msg, () => {});
+        }
+      }
+    });
+    return true;
+  }
 });

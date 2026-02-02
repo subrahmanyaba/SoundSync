@@ -20,7 +20,7 @@
     color: "#0ff",
     fontSize: "24px",
     fontWeight: "bold",
-    display: "flex",
+    display: "none",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: "50%",
@@ -76,14 +76,23 @@
     };
   };
 
-  // 2) Restore saved position with clamp
-  chrome.storage.local.get("overlayPos", data => {
+  // 2) Restore saved position and visibility with clamp
+  chrome.storage.local.get(["overlayPos", "overlayHidden"], data => {
     if (data.overlayPos) {
       const parsedLeft = parseInt(data.overlayPos.left);
       const parsedTop = parseInt(data.overlayPos.top);
       const clamped = clampPosition(parsedLeft, parsedTop);
       btn.style.left = `${clamped.left}px`;
       btn.style.top = `${clamped.top}px`;
+    }
+    // Restore hidden state or show button
+    if (data.overlayHidden) {
+      btn.style.display = "none";
+      handle.style.display = "flex";
+      handle.style.left = data.overlayHidden.handleLeft || "0px";
+      handle.style.top = data.overlayHidden.handleTop || "100px";
+    } else {
+      btn.style.display = "flex";
     }
   });
 
@@ -100,6 +109,20 @@
     if (msg.action === "overrideToggled") {
       overrideActive = msg.overrideActive;
       btn.style.boxShadow = overrideActive ? "none" : "0 0 12px 4px #0ff";
+    }
+    // Sync overlay visibility across tabs
+    if (msg.action === "overlayVisibilityChanged") {
+      if (msg.hidden) {
+        btn.style.display = "none";
+        handle.style.display = "flex";
+        handle.style.left = msg.handleLeft || "0px";
+        handle.style.top = msg.handleTop || "100px";
+      } else {
+        btn.style.display = "flex";
+        handle.style.display = "none";
+        if (msg.btnLeft) btn.style.left = msg.btnLeft;
+        if (msg.btnTop) btn.style.top = msg.btnTop;
+      }
     }
   });
 
@@ -150,14 +173,24 @@
         handle.style.display = "flex";
         handle.style.left = "0px";
         handle.style.top = `${clamped.top}px`;
+        // Save and broadcast hidden state
+        const hiddenState = { handleLeft: "0px", handleTop: `${clamped.top}px` };
+        chrome.storage.local.set({ overlayHidden: hiddenState });
+        chrome.runtime.sendMessage({ action: "overlayVisibilityChanged", hidden: true, ...hiddenState });
       } else if (clamped.left >= window.innerWidth - 48 - dockThreshold) {
         // Dock to right
         btn.style.display = "none";
         handle.style.display = "flex";
         handle.style.left = `${window.innerWidth - 20}px`;
         handle.style.top = `${clamped.top}px`;
+        // Save and broadcast hidden state
+        const hiddenState = { handleLeft: `${window.innerWidth - 20}px`, handleTop: `${clamped.top}px` };
+        chrome.storage.local.set({ overlayHidden: hiddenState });
+        chrome.runtime.sendMessage({ action: "overlayVisibilityChanged", hidden: true, ...hiddenState });
       } else {
         handle.style.display = "none";
+        // Clear hidden state when not docked
+        chrome.storage.local.remove("overlayHidden");
       }
 
       chrome.storage.local.set({
@@ -194,7 +227,17 @@
 
   btn.style.display = "flex";
   handle.style.display = "none";
-  btn.style.left = isLeft ? "0px" : `${window.innerWidth - 48}px`;
+  const newBtnLeft = isLeft ? "0px" : `${window.innerWidth - 48}px`;
+  btn.style.left = newBtnLeft;
+  
+  // Clear hidden state and broadcast visibility
+  chrome.storage.local.remove("overlayHidden");
+  chrome.runtime.sendMessage({ 
+    action: "overlayVisibilityChanged", 
+    hidden: false, 
+    btnLeft: newBtnLeft, 
+    btnTop: btn.style.top 
+  });
 });
 
 
